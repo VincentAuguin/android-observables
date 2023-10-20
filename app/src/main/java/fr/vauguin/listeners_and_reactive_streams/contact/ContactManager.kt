@@ -52,12 +52,6 @@ class ContactManagerImpl(
     init {
         emitAllContacts()
         observeContactUpdates()
-
-        scope.launch {
-            contacts.collect { contacts ->
-                listeners.forEach { it.onChange(contacts) }
-            }
-        }
     }
 
     override fun addListener(listener: ContactListener) {
