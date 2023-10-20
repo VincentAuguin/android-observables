@@ -12,10 +12,16 @@ import android.provider.ContactsContract
 import android.util.Log
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 interface ContactManager {
@@ -33,7 +39,7 @@ class ContactManagerImpl(
 
     private val scope = CoroutineScope(coroutineContext)
 
-    private val listeners = mutableSetOf<ContactListener>()
+    private val listeners = MutableStateFlow(emptySet<ContactListener>())
 
     private var listenersJob: Job? = null
 
@@ -52,26 +58,15 @@ class ContactManagerImpl(
     init {
         emitAllContacts()
         observeContactUpdates()
+        startListenersObservation()
     }
 
     override fun addListener(listener: ContactListener) {
-        listeners.add(listener)
-
-        if (listenersJob == null) {
-            listenersJob = scope.launch {
-                contacts.collect { contacts -> listeners.forEach { it.onChange(contacts) } }
-            }
-        }
+        listeners.value += listener
     }
 
     override fun removeListener(listener: ContactListener) {
-        listeners.remove(listener)
-
-
-        if (listeners.isEmpty()) {
-            listenersJob?.cancel()
-            listenersJob = null
-        }
+        listeners.value -= listener
     }
 
     private fun observeContactUpdates(): Boolean {
@@ -90,6 +85,23 @@ class ContactManagerImpl(
             contentObserver
         )
         return true
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun startListenersObservation() {
+        scope.launch {
+            listeners
+                .flatMapLatest { listeners ->
+                    if (listeners.isEmpty()) {
+                        emptyFlow()
+                    } else {
+                        contacts.onEach { contacts ->
+                            listeners.forEach { it.onChange(contacts) }
+                        }
+                    }
+                }
+                .collect()
+        }
     }
 
     private fun emitAllContacts() {
